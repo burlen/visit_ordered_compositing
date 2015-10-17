@@ -8,7 +8,7 @@
 
 % Title Page
 \title{Rendering and Compositing Infrastructure Improvements to VisIt for Insitu Rendering}
-\author{Burlen Loring and Oliver Oliver R\"ubel*}
+\author{Burlen Loring and Oliver Oliver R\"ubel}
 
 
 \begin{document}
@@ -21,7 +21,7 @@ Compared to posthoc rendering, insitu rendering often generates larger numbers o
 \section{Introduction}
 Insitu visualization and analysis seeks to reduce or eliminate data movement to and from disk by linking a simulation and a visualization run time using shared memory for data transfer. Insitu rendering has the potential for huge reductions in I/O costs as problem sized data is reduced to a single image before I/O. One potential drawback to insitu rendering is that one often doesn't know which fields will be interesting and which rendering parameters will produce the best result. For these reasons, compared posthoc rendering, insitu rendering generates a larger number of images, covering more fields, and wider array of rendering parameters. For these reasons rendering performance and scaling becomes a crucial issue in the insitu setting.
 
-We profiled VisIt during 3D simulations of proton accelerator\cite{stepan, olvier} using WarpIV\cite{warpiv}, an insitu visualization application that couples VisIt and Warp\cite{warp} a laser plasma accelerator framework. Our profiling identified the rendering and compositing of translucent geometry as issues.
+We profiled VisIt during 3D simulations of proton accelerator using WarpIV, an insitu visualization application that couples VisIt and Warp a laser plasma accelerator framework. Our profiling identified the rendering and compositing of translucent geometry as issues.
 
 In this work we present optimizations and improvements to VisIt's rendering and compositing infrastructure. We added the capability for alpha blend compositing and use it with ordered compositing when datasets have disjoint block domain decomposition to increase performance when rendering transparent geometry. We also made improvements that increase overall efficiency and addressed a number of performance issues. We structured our code to take advantage of SIMD parallelization and use threads to overlap communication and compositing. We tested our work on a 20 core workstation using 8 cores to render geometry generated from a $256^3$ cosmology dataset and on a Cray XC31 using 512 cores to render geometry generated from a $2000^2 \times 800$ plasma dataset. Our results show that ordered compositing provides a speed up of up to $4 \times$ over the current sort first strategy. The other improvements resulted in modest speed up with one notable exception where we achieve up to $40 \times$ speed up of rendering and compositing of opaque geometry when both opaque and transparent geometry are rendered together. We also investigated the use of depth peeling, but found that the implementation provided by VTK is substantially slower,both with and without GPU acceleration, than a local camera order sort.
 
@@ -83,7 +83,7 @@ The main optimization is ordered compositing. We investigated the following othe
 \end{itemize}
 
 \section{Results}
-We benchmarked our work on two datasets, a $256^3$ cosmology simulation and a $2000^2 \times 800$ plasma simulations, on two systems, a 20 core graphics workstation using 8 cores and a Cray XC31 using 512 cores. The details can be found in the tables in figures \ref{fig:speedup_cosmo} and \ref{fig:speedup_vpic}. Our primary optimization, ordered compositing, generally produced substantial speed up. The results are dependent on the geometry size and the number of processes used. In our tests we achieved $\approx 2 \times$ speed up on the workstation and $\approx 4 \times$ speed up on the Cray. In general our other optimizations achieved very modest speed-up. One notable exception is that when both rendering passes were engaged, during the opaque pass we achieved $\approx 11 \times$ speed up on the workstation, and $\approx 40 \times$ speed-up on the Cray. This is due to a bug we fixed that was causing the translucent geometry to be sorted(global+local) twice.
+We benchmarked our work on two datasets, a $256^3$ cosmology simulation and a $2000^2 \times 800$ plasma simulations, on two systems, a 20 core graphics workstation using 8 cores and a Cray XC31 using 512 cores. The details can be found in the tables in figures \ref{fig:speedup_cosmo} and \ref{fig:speedup_vpic}. Our primary optimization, ordered compositing, generally produced substantial speed up. The results are dependent on the geometry size and the number of processes used. In our tests we achieved $\approx 2 \times$ speed up on the workstation and $\approx 4 \times$ speed up on the Cray. In general for the opaque pass our other optimizations achieved modest speed-up of on the order of 10\%. One notable exception is that when both rendering passes were engaged, during the opaque pass we achieved $\approx 11 \times$ speed up on the workstation, and $\approx 40 \times$ speed-up on the Cray. This is due to a bug we fixed that was causing the translucent geometry to be sorted(global+local) twice.
 
 \begin{figure}[ht]
 \centering
@@ -220,6 +220,6 @@ Despite its poor performance depth peeling is a useful feature because VTK doesn
 We added controls in VisIt's GUI for the new features. These are shown in figure \ref{fig:settings}. Ordered compositing is enabled by default but can be optionally  disabled. Depth peeling is disabled by default be can be optionally enabled.
 
 \section{Conclusion}
-Compared to posthoc rendering, insitu rendering often generates larger numbers of images, as a result rendering performance and scalability are critical in the insitu setting. In this work we have added alpha bend compositing capability to VisIt and applied the well known ordered compositing optimization for transparent rendering, and have addressed a number of performance issues. The impact is that VisIt is better prepared for insitu rendering.
+Compared to posthoc rendering, insitu rendering often generates larger numbers of images, as a result rendering performance and scalability are critical in the insitu setting. We implemented improvements to VisIt's rendering and compositing infrastructure that deliver increased performance and scalability in both posthoc and insitu settings. Specifically we have added alpha bend compositing capability to VisIt and applied the well known ordered compositing optimization for transparent rendering, and have addressed a number of performance issues. The impact is that VisIt performs is better prepared for insitu rendering work loads.
 
 \end{document}
