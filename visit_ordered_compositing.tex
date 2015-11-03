@@ -19,27 +19,6 @@ Compared to posthoc rendering, insitu rendering often generates larger numbers o
 \end{abstract}
 
 \section{Introduction}
-Insitu visualization and analysis seeks to reduce or eliminate data movement to and from disk by linking a simulation and a visualization run time using shared memory for data transfer. Insitu rendering has the potential for huge reductions in I/O costs as problem sized data is reduced to a single image before I/O. One potential drawback to insitu rendering is that one often doesn't know which fields will be interesting and which rendering parameters will produce the best result. For these reasons, compared posthoc rendering, insitu rendering generates a larger number of images, covering more fields, and wider array of rendering parameters. For these reasons rendering performance and scaling becomes a crucial issue in the insitu setting.
-
-We profiled VisIt during 3D simulations of proton accelerator using WarpIV, an insitu visualization application that couples VisIt and Warp a laser plasma accelerator framework. Our profiling identified the rendering and compositing of translucent geometry as issues.
-
-In this work we present optimizations and improvements to VisIt's rendering and compositing infrastructure. We added the capability for alpha blend compositing and use it with ordered compositing when datasets have disjoint block domain decomposition to increase performance when rendering transparent geometry. We also made improvements that increase overall efficiency and addressed a number of performance issues. We structured our code to take advantage of SIMD parallelization and use threads to overlap communication and compositing. We tested our work on a 20 core workstation using 8 cores to render geometry generated from a $256^3$ cosmology dataset and on a Cray XC31 using 512 cores to render geometry generated from a $2000^2 \times 800$ plasma dataset. Our results show that ordered compositing provides a speed up of up to $4 \times$ over the current sort first strategy. The other improvements resulted in modest speed up with one notable exception where we achieve up to $40 \times$ speed up of rendering and compositing of opaque geometry when both opaque and transparent geometry are rendered together. We also investigated the use of depth peeling, but found that the implementation provided by VTK is substantially slower,both with and without GPU acceleration, than a local camera order sort.
-
-\section{Description of the Work}
-Prior to our work VisIt always used a ``sort first'' strategy for rendering transparent geometry in parallel. In this strategy prior to rendering data was moved using MPI such that each process had all the geometry covered by a screen space tile. After rendering each process sends its tile to rank 0 for assemblage. In this arrangement one can apply serial rendering algorithms, and alpha blend compositing is not necessary. This is illustrated in figure \ref{fig:example}. On the left a dataset with 10 iso-surfaces is shown. The coloring by MPI rank id reveals the block based domain decomposition. In the sort first strategy, prior to rendering, the transparent geometry is moved to the screen space domain decomposition shown on the right. In what follows we refer to this data movement as a ``global sort''. The global sort is expensive because all of the data may need to be moved and it doubles the amount of memory used to store transparent geometry.
-
-Our work builds on VisIt svn rev 27127(9/9/2015). We used rev 27127 as the baseline to compare our optimizations against. Parallel rendering in VisIt occurs in two logical passes, a pass for opaque geometry, and a pass for transparent geometry. Prior to our work, the opaque pass included a depth based composite where the unsigned char r,g,b color channels and float depth values are packed into an AOS(array of structures) layout and composited in user defined MPI reduction operation; and the transparent pass included a distributed global geometry sort which moves data onto a decomposition such that each rank ends up with geometry for a unique screen space tile, followed by a local camera order sort and render, followed by an MPI gather of each ranks tile to rank 0.
-
-Our work extended the transparent rendering and compositing capabilities of VisIt in four main ways: 
-\begin{itemize}
- \item We implemented an alpha blending compositer and a depth based compositer. Our new compositer operates on SOA(structures of arrays) data layout to make use of compiler auto-vectorization. We used threads to overlap communication and compositing. We arranged the communications in a binary tree pattern but also made provision for supporting a variety of alternative communication patterns.
- \item We implemented the ordered compositing optimization, which for translucent block domain decomposed data eliminates the communication associated with the global sort and cuts memory overhead in half.
- \item We added the capability to enable VTK's depth peeling algorithm from VisIt's GUI.
- \item We optimized code, cleaned up, and fixed bugs as we went.
-\end{itemize}
-
-\section{Optimizations}
-\subsection*{Ordered Compositing}
 \begin{figure}
 \centering
 \begin{minipage}{0.48\textwidth}
@@ -69,22 +48,8 @@ round 2: & $4 \leftarrow 7$ \\ \hline
 \end{minipage}
 \end{figure}
 
-Ordered compositing is an optimization for rendering translucent block decomposed data. When the decomposition's block's bounds are mutually disjoint one can find a compositing order that produces the same result as a global sort without moving any data. Compared to the sort-first strategy rather than re-distributing geometry in a global sort, ordered compositing renders the data in place and uses alpha bend compositing to combing each processes rendering. Ordered compositing is faster when the amount of data to move in the global sort is large. An example is shown in figure \ref{fig:example}. The data is rendered using the domain decomposition shown on the left. Our alpha blending compositer makes use of associativity of the alpha blending operation and structures the compositing in a binary tree. The compositing order and subsequent tree is shown in the table in figure \ref{fig:example}. When the root of the tree is not rank 0, the final image needs to be transferred to rank 0.
-
-\subsection*{Other Improvements}
-The main optimization is ordered compositing. We investigated the following other optimizations:
-\begin{itemize}
- \item SIMD vectorization of the depth and blending compositer kernels
- \item using threads to overlap communication and compositing
- \item eliminating memcpy where ever possible, including making better use of shallow copy of VTK objects
- \item eliminate read-back from OpenGL if not using the channel
- \item eliminating or reducing communication where ever possible
- \item only update sorting pipeline when dependent input parameters change
-\end{itemize}
-
-\section{Results}
-We benchmarked our work on two datasets, a $256^3$ cosmology simulation and a $2000^2 \times 800$ plasma simulations, on two systems, a 20 core graphics workstation using 8 cores and a Cray XC31 using 512 cores. The details can be found in the tables in figures \ref{fig:speedup_cosmo} and \ref{fig:speedup_vpic}. Our primary optimization, ordered compositing, generally produced substantial speed up. The results are dependent on the geometry size and the number of processes used. In our tests we achieved $\approx 2 \times$ speed up on the workstation and $\approx 4 \times$ speed up on the Cray. In general for the opaque pass our other optimizations achieved modest speed-up of on the order of 10\%. One notable exception is that when both rendering passes were engaged, during the opaque pass we achieved $\approx 11 \times$ speed up on the workstation, and $\approx 40 \times$ speed-up on the Cray. This is due to a bug we fixed that was causing the translucent geometry to be sorted(global+local) twice.
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% plasma dataset and speed up plots
 \begin{figure}[ht]
 \centering
 \includegraphics[height=3.0in]{./vpic_test_case_0030.png}
@@ -93,6 +58,10 @@ We benchmarked our work on two datasets, a $256^3$ cosmology simulation and a $2
 \includegraphics[height=2.25in]{./speed_up_vpic.png} 
 \end{center}
 \end{minipage}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% plasma dataset table and speed up
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% rendering time
 \begin{minipage}{0.5\textwidth}
 %\begin{center}
 {\footnotesize
@@ -109,9 +78,9 @@ trans. & 20 iso & 464815961 \\ \hline
 \begin{tabular}{|c|c|}
 \hline
 \multicolumn{2}{|c|}{\bf{Speedup vs trunk}} \\ \hline
- total & 6.31 \\ \cline{1-2}
- opaque & 42.85 \\ \cline{1-2}
- transparent & 3.82 \\ \hline
+ total & 8.34 \\ \cline{1-2}
+ opaque & 52.65 \\ \cline{1-2}
+ transparent & 5.12 \\ \hline
 \end{tabular}}\vspace{0.08in}
 {\footnotesize
 \def\arraystretch{1.5}
@@ -120,7 +89,7 @@ trans. & 20 iso & 464815961 \\ \hline
 \multicolumn{5}{|c|}{\bf Render and Composite Time} \\ \hline
 {\bf code} & {\bf configuration} & {\bf total} & {\bf trans.} & {\bf opaque} \\ \hline
 \multirow{2}{*}{opt.} & global sort & 21.0305 & 20.6666 & 0.354182 \\ \cline{2-5}
- & ordered comp. &  6.01573 & 5.44624 & 0.400792 \\ \hline
+ & ordered comp. &  4.55346 & 4.06768 & 0.326197 \\ \hline
 trunk & global sort & 37.9864 & 20.8121 & 17.1737 \\ \hline
 \end{tabular}}
 %\end{center}
@@ -129,6 +98,8 @@ trunk & global sort & 37.9864 & 20.8121 & 17.1737 \\ \hline
 \label{fig:speedup_vpic}
 \end{figure}
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% cosmology dataset and speed up plots
 \begin{figure}
 \begin{minipage}{0.56\textwidth}
 \includegraphics[height=3.0in]{./cosmology_test_case_0080.png} 
@@ -136,7 +107,8 @@ trunk & global sort & 37.9864 & 20.8121 & 17.1737 \\ \hline
 \begin{minipage}{0.30\textwidth}
 \includegraphics[height=2.25in]{./speed_up_cosmo.png} 
 \end{minipage}
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% cosmology dataset table and speed up
 \begin{minipage}{1.0\textwidth}
 \begin{center}
 \vspace{0.05in}
@@ -154,16 +126,17 @@ trans. & 10 iso & 9884369 \\ \hline
 \begin{tabular}{|c|c|c|}
 \hline
 \multicolumn{3}{|c|}{\bf{Speedup compared to trunk}} \\ \hline
-\multirow{4}{*}{GTX770} & total & 3.58 \\ \cline{2-3}
- & opaque & 11.89 \\ \cline{2-3}
- & transparent & 2.34 \\ \hline
+\multirow{4}{*}{GTX770} & total & 3.98 \\ \cline{2-3}
+ & opaque & 11.64 \\ \cline{2-3}
+ & transparent & 2.73 \\ \hline
 \multirow{3}{*}{OSMesa} & total & 2.83 \\ \cline{2-3}
  & opaque & 11.34 \\ \cline{2-3}
- & transparent & 2.08 \\ \hline
+ & transparent & 2.08  \\ \hline
 \end{tabular}}
 \end{center}
 \end{minipage}
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% cosmology rendering time
 \begin{minipage}{1.0\textwidth}
 \begin{center}
 {\footnotesize
@@ -174,39 +147,115 @@ trans. & 10 iso & 9884369 \\ \hline
 \multicolumn{2}{|c|}{}& \multicolumn{3}{|c|}{\bf OSMesa 7.10 } & \multicolumn{3}{|c|}{\bf NVIDIA GTX770 GPU} \\ \hline
 {\bf code} & {\bf configuration} & {\bf total} & {\bf trans.} & {\bf opaque} & {\bf total} & {\bf trans.} & {\bf opaque} \\ \hline
 \multirow{3}{*}{opt.} & global sort &  4.30541 & 4.11388 & 0.187808 & 2.51254 & 2.33435 & 0.174466 \\ \cline{2-8}
- & ordered comp. & 2.16096 & 1.93264 & 0.184575 & 1.21876 & 1.00458 & 0.168962 \\ \cline{2-8}
+ & ordered comp. & 2.16096 & 1.93264 & 0.184575 & 1.09519 & 0.860169 & 0.172628 \\ \cline{2-8}
  & depth peel & 42.0545 & 41.8255 & 0.185432 & 6.2353 & 6.02038 & 0.170824 \\ \hline
 trunk & global sort &  6.11546 & 4.02224 & 2.09239 & 6.11546 & 4.02224 & 2.09239 \\ \hline
 \end{tabular}}
 \end{center}
 \end{minipage}
-
 \caption{\footnotesize {\bf Top Left:} $256^3$ cosmology dataset. {\bf Top Right:} Speedup of total rendering and compositing time using 8 cores, and 2 threads, on the $256^3$ cosmology dataset. Total and per pass time are shown. In the opaque pass z-buffer compositing is used while in the transparent pass ordered compositing and alpha blending are used. {\bf Bottom:} Data and measurements.}
 \label{fig:speedup_cosmo}
 \end{figure}
 
-\subsection*{Depth Peeling}
+\begin{figure}
+\begin{minipage}{0.5\textwidth}
+\includegraphics[height=2.25in]{./depth_sort_speedup.png}
+\end{minipage}
+\begin{minipage}{0.4\textwidth}
+{\footnotesize
+\def\arraystretch{1.25}
+\begin{tabular}{|l|l|l|l|} \hline
+{\bf code} & {\bf point} & {\bf bounds} & {\bf param} \\ \hline
+old & 2.58 sec & 3.05 sec & 3.19 sec \\ \hline
+new & 0.82 sec & 1.02 sec & 1.65 sec \\ \hline 
+speed up & 3.14 x & 2.98 x & 1.93 x \\ \hline
+\end{tabular}}
+\end{minipage}
+\caption{{\bf Left:}Time and speed up of just the depth sort sorting the iso-surfaces shown in figure \ref{fig:speedup_cosmo} using 1 core. {\bf Right:} Recorded times. }
+\label{fig:blah}
+\end{figure}
+
 \begin{figure}
 \centering
 \begin{minipage}{0.28\textwidth}
 \begin{center}
- \includegraphics[height=2.0in]{./spheres_with_sort_crop.png}
- \end{center}
+\includegraphics[height=2.0in]{./spheres_with_sort_crop.png}
+\end{center}
 \end{minipage}
 \begin{minipage}{0.28\textwidth}
- \begin{center}
- \includegraphics[height=2.0in]{./spheres_with_depth_peel_crop.png}
+\begin{center}
+\includegraphics[height=2.0in]{./spheres_with_depth_peel_crop.png}
 \end{center}
 \end{minipage}
 \begin{minipage}{0.3\textwidth}
- \begin{center}
- \includegraphics[height=2.25in]{./depth_peeling_time_cosmo.png}
+\begin{center}
+\includegraphics[height=2.25in]{./depth_peeling_time_cosmo.png}
 \end{center}
 \end{minipage}
 \caption{\footnotesize {\bf Left:} Spheres rendered with camera order sort. {\bf Right:} Spheres rendered with depth peeling. {\bf Far Right:} Depth peeling performance.}
 \label{fig:depth_peel}
 \end{figure}
-We investigated the use of depth peeling, a GPU accelerated algorithm that would eliminate the need for local camera order geometry sort during translucent rendering. In the implementation we tested there are two user modify-able parameters, number of peels and occlusion ratio. The occlusion ratio sets a threshold on the the fraction of pixels changed per peel below which the algorithm terminates. The number of peels sets the maximum number of peels to perform. When the occlusion ratio is set to zero all of the peels are performed. We found that for complex scenes 32 peels and a occlusion ratio of 0.01 were reasonable settings.  Unfortunately we found depth peeling to be substantially slower than the local geometry sort. The results are shown right most panel of figure \ref{fig:depth_peel}. 
+
+Insitu visualization and analysis seeks to reduce or eliminate data movement to and from disk by linking a simulation and a visualization run time using shared memory for data transfer. Insitu rendering has the potential for huge reductions in I/O costs as problem sized data is reduced to a single image before I/O. One potential drawback to insitu rendering is that one often doesn't know which fields will be interesting and which rendering parameters will produce the best result. For these reasons, compared posthoc rendering, insitu rendering generates a larger number of images, covering more fields, and wider array of rendering parameters. For these reasons rendering performance and scaling becomes a crucial issue in the insitu setting.
+
+We profiled VisIt during 3D simulations of proton accelerator using WarpIV, an insitu visualization application that couples VisIt and Warp a laser plasma accelerator framework. Our profiling identified the rendering and compositing of translucent geometry as issues.
+
+In this work we present optimizations and improvements to VisIt's rendering and compositing infrastructure. We added the capability for alpha blend compositing and use it with ordered compositing when datasets have disjoint block domain decomposition to increase performance when rendering transparent geometry. We also made improvements that increase overall efficiency and addressed a number of performance issues. We structured our code to take advantage of SIMD parallelization and use threads to overlap communication and compositing. We tested our work on a 20 core workstation using 8 cores to render geometry generated from a $256^3$ cosmology dataset and on a Cray XC31 using 512 cores to render geometry generated from a $2000^2 \times 800$ plasma dataset. Our results show that ordered compositing provides a speed up of up to $4 \times$ over the current sort first strategy. The other improvements resulted in modest speed up with one notable exception where we achieve up to $40 \times$ speed up of rendering and compositing of opaque geometry when both opaque and transparent geometry are rendered together. We also investigated the use of depth peeling, but found that the implementation provided by VTK is substantially slower,both with and without GPU acceleration, than a local camera order sort.
+
+\section{Description of the Work}
+Prior to our work VisIt always used a ``sort first'' strategy for rendering transparent geometry in parallel. In this strategy prior to rendering data was moved using MPI such that each process had all the geometry covered by a screen space tile. After rendering each process sends its tile to rank 0 for assemblage. In this arrangement one can apply serial rendering algorithms, and alpha blend compositing is not necessary. This is illustrated in figure \ref{fig:example}. On the left a dataset with 10 iso-surfaces is shown. The coloring by MPI rank id reveals the block based domain decomposition. In the sort first strategy, prior to rendering, the transparent geometry is moved to the screen space domain decomposition shown on the right. In what follows we refer to this data movement as a ``global sort''. The global sort is expensive because all of the data may need to be moved and it doubles the amount of memory used to store transparent geometry.
+
+Our work builds on VisIt svn rev 27127(9/9/2015). We used rev 27127 as the baseline to compare our optimizations against. Parallel rendering in VisIt occurs in two logical passes, a pass for opaque geometry, and a pass for transparent geometry. Prior to our work, the opaque pass included a depth based composite where the unsigned char r,g,b color channels and float depth values are packed into an AOS(array of structures) layout and composited in user defined MPI reduction operation; and the transparent pass included a distributed global geometry sort which moves data onto a decomposition such that each rank ends up with geometry for a unique screen space tile, followed by a local camera order sort and render, followed by an MPI gather of each ranks tile to rank 0.
+
+Our work extended the transparent rendering and compositing capabilities of VisIt in four main ways: 
+\begin{itemize}
+ \item We implemented an alpha blending compositer and a depth based compositer. Our new compositer operates on SOA(structures of arrays) data layout to make use of compiler auto-vectorization. We used threads to overlap communication and compositing. We arranged the communications in a binary tree pattern but also made provision for supporting a variety of alternative communication patterns.
+ \item We implemented the ordered compositing optimization, which for translucent block domain decomposed data eliminates the communication associated with the global sort and cuts memory overhead in half.
+ \item We added the capability to enable VTK's depth peeling algorithm from VisIt's GUI.
+ \item We optimized code, cleaned up, and fixed bugs as we went.
+\end{itemize}
+
+\section{Optimizations and Improvements}
+\subsection*{Ordered Compositing}
+Ordered compositing is an optimization for rendering translucent block decomposed data. When the decomposition's block's bounds are mutually disjoint one can find a compositing order that produces the same result as a global sort without moving any data. Compared to the sort-first strategy rather than re-distributing geometry in a global sort, ordered compositing renders the data in place and uses alpha bend compositing to combing each processes rendering. Ordered compositing is faster when the amount of data to move in the global sort is large. An example is shown in figure \ref{fig:example}. The data is rendered using the domain decomposition shown on the left. Our alpha blending compositer makes use of associativity of the alpha blending operation and structures the compositing in a binary tree. The compositing order and subsequent tree is shown in the table in figure \ref{fig:example}. When the root of the tree is not rank 0, the final image needs to be transferred to rank 0.
+
+\subsection*{Depth Sort}
+The primary mechanism for correctly rendering translucent geometry in VisIt is a camera order geometry sort, this is generally called depth sort. VisIt makes use of VTK's depth sort called vtkDepthSortPolyData. Our profiling of the VTK class revealed several opportunities which we capitalized on:
+\begin{itemize}
+ \item replaced qsort with std::sort to take advantage of compiler in-lining
+ \item replace GetCell with GetCellPoints. GetCell explicitly constructs a VTK cell object containing a number of sub-objects using virtual API. Because we only need the cell's points, constructing a cell object is over kill. The GetCellPoints API copies the point indices into an array, we then access the points in-place without copying them. This change requires templates, the use of which further improves the compiler ability to optimize.
+ \item refactor the bounds computations so the compiler can vectorize it using SIMD instructions.
+ \item Refactor vtkPolyData::BuildCells to avoid the virtual vtkDataSet API
+ \item Move the non-virtual vtkPolyData::GetCellPoints into the header to enable in-lining
+ \item Add a non-virtual vtkPolyData::GetCell to enable fast out of order transfer of cells from one dataset to another. With this method one may use memcpy cell by cell.
+\end{itemize}
+
+
+
+
+
+
+\subsection*{Depth Peeling}
+We investigated the use of depth peeling, a GPU accelerated algorithm that would eliminate the need for local camera order geometry sort during translucent rendering. There are two user modify-able parameters in VTK's implementation, number of peels and occlusion ratio. The occlusion ratio sets a threshold on the the fraction of pixels changed per peel below which the algorithm terminates. The number of peels sets the maximum number of peels to perform. When the occlusion ratio is set to zero all of the peels are performed. We found that for complex scenes 32 peels and a occlusion ratio of 0.01 were reasonable settings, and as expected when rendering simple scenes the non-zero occlusion ratio resulted in early termination and better performance.
+
+\subsection*{Other Improvements}
+While implementing ordered compositing, writing our compositer, and refactoring existing code, we investigated the following other optimizations:
+\begin{itemize}
+ \item SIMD vectorization of the depth and blending compositer kernels
+ \item using threads to overlap communication and compositing
+ \item eliminating memcpy where ever possible, including making better use of shallow copy of VTK objects
+ \item eliminate read-back from OpenGL if not using the channel
+ \item eliminating or reducing communication where ever possible
+ \item only update sorting pipeline when dependent input parameters change
+ \item use templates to avoid memcpy and conversion and improve compiler optimization
+\end{itemize}
+Most of these are what could be considered contemporary ``best practices'' for C++ development.
+
+\section{Results}
+We benchmarked our work on two datasets, a $256^3$ cosmology simulation and a $2000^2 \times 800$ plasma simulations, on two systems, a 20 core graphics workstation using 8 cores and a Cray XC31 using 512 cores. The details can be found in the tables in figures \ref{fig:speedup_cosmo} and \ref{fig:speedup_vpic}. Our primary optimization, ordered compositing, generally produced substantial speed up. The results are dependent on the geometry size and the number of processes used. In our tests we achieved $\approx 2 \times$ speed up on the workstation and $\approx 4 \times$ speed up on the Cray. In general during the opaque pass we achieved a modest speed-up of on the order of 10\%. However, when both rendering passes were active (because there is both opaque and translucent geometry), during the opaque pass we achieved $\approx 11 \times$ speed up on the workstation using 8 cores, and $\approx 50 \times$ speed-up on the Cray using 512 cores. This is due to a bug we fixed that was causing the translucent geometry to be sorted (global+local) twice. On the workstation we looked at the performance both using OSMesa a software OpenGL implementation and using a hardware accelerated OpenGL using an NVIDIA GTX770 card. The speedup is higher on the GPU because rendering time is a significant portion of the total time, meaning improvements there magnify the impact of the other optimizations.
+
+\subsection*{Depth Peeling}
+Unfortunately we found VTK's depth peeling algorithm to be substantially slower than the local geometry sort. The results are shown right most panel of figure \ref{fig:depth_peel}. 
 
 Despite its poor performance depth peeling is a useful feature because VTK doesn't split intersecting geometry. The left two panels of figure \ref{fig:depth_peel} show a comparison of rendering using local geometry sort on the left and depth peeling on the right. Artifacts from intersecting geometry are present in the locally sorted rendering. Depth peeling is slower but produces the correct result. For this reason it is a useful feature to have available.
 
@@ -220,6 +269,6 @@ Despite its poor performance depth peeling is a useful feature because VTK doesn
 We added controls in VisIt's GUI for the new features. These are shown in figure \ref{fig:settings}. Ordered compositing is enabled by default but can be optionally  disabled. Depth peeling is disabled by default be can be optionally enabled.
 
 \section{Conclusion}
-Compared to posthoc rendering, insitu rendering often generates larger numbers of images, as a result rendering performance and scalability are critical in the insitu setting. We implemented improvements to VisIt's rendering and compositing infrastructure that deliver increased performance and scalability in both posthoc and insitu settings. Specifically we have added alpha bend compositing capability to VisIt and applied the well known ordered compositing optimization for transparent rendering, and have addressed a number of performance issues. The impact is that VisIt performs is better prepared for insitu rendering work loads.
+Compared to posthoc rendering, insitu rendering often generates larger numbers of images, as a result rendering performance and scalability are critical in the insitu setting. We implemented improvements to VisIt's rendering and compositing infrastructure that deliver increased performance and scalability in both posthoc and insitu settings. Specifically we have added alpha bend compositing capability to VisIt and applied the well known ordered compositing optimization for transparent rendering, optimized the camera order sorting algorithm in VTK, and have addressed a number of performance and efficiency issues in VisIt. The impact is that VisIt performs is better prepared for insitu rendering work loads.
 
 \end{document}
